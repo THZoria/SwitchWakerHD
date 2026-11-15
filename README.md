@@ -5,6 +5,8 @@ The [standalone Windows PC builder](docs/switch2-pc-builder.md) builds a private
 `wwhd_switch2.nro` and external `romfs` folder from the owner's dump, without
 installing developer tools on the user's PC. The existing Switch 1 build is unchanged.
 
+https://github.com/user-attachments/assets/9bc07d9a-6fc0-4546-b7b7-c5d4d15f1cbd
+
 ## What it is
 
 SwitchWakerHD is an unofficial native port of a 2013 Wii U adventure game (title ID
