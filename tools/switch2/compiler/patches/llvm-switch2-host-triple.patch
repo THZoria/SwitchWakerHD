@@ -1,0 +1,35 @@
+diff --git a/llvm/lib/TargetParser/Unix/Host.inc b/llvm/lib/TargetParser/Unix/Host.inc
+--- a/llvm/lib/TargetParser/Unix/Host.inc
++++ b/llvm/lib/TargetParser/Unix/Host.inc
+@@ -19,7 +19,9 @@
+ #include "llvm/Config/config.h"
+ #include <cctype>
+ #include <string>
++#if !defined(__SWITCH2__)
+ #include <sys/utsname.h>
++#endif
+ 
+ #ifdef HAVE_UNISTD_H
+ #include <unistd.h>
+@@ -27,6 +29,7 @@
+ 
+ using namespace llvm;
+ 
++#if !defined(__SWITCH2__)
+ static std::string getOSVersion() {
+   struct utsname info;
+ 
+@@ -71,6 +74,13 @@ static std::string updateTripleOSVersion(std::string TargetTripleString) {
+   }
+   return TargetTripleString;
+ }
++#else
++static std::string updateTripleOSVersion(std::string TargetTripleString) {
++  // The embedded compiler uses an explicit bare-metal AArch64 target. There
++  // is no uname service and no desktop OS version to append on Horizon.
++  return TargetTripleString;
++}
++#endif
+ 
+ std::string sys::getDefaultTargetTriple() {
+   std::string TargetTripleString =

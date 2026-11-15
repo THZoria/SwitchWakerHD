@@ -1,0 +1,46 @@
+diff --git a/Modules/faulthandler.c b/Modules/faulthandler.c
+--- a/Modules/faulthandler.c
++++ b/Modules/faulthandler.c
+@@ -976,7 +976,7 @@ faulthandler_suppress_crash_report(void)
+     SetErrorMode(mode | SEM_NOGPFAULTERRORBOX);
+ #endif
+ 
+-#ifdef HAVE_SYS_RESOURCE_H
++#if defined(HAVE_SYS_RESOURCE_H) && defined(HAVE_GETRLIMIT) && defined(HAVE_SETRLIMIT)
+     struct rlimit rl;
+ 
+     /* Disable creation of core dump */
+diff --git a/Modules/timemodule.c b/Modules/timemodule.c
+--- a/Modules/timemodule.c
++++ b/Modules/timemodule.c
+@@ -41,7 +41,7 @@
+ #  include <sanitizer/msan_interface.h>
+ #endif
+ 
+-#ifdef _MSC_VER
++#if defined(_MSC_VER) || defined(__SWITCH2__)
+ #  define _Py_timezone _timezone
+ #  define _Py_daylight _daylight
+ #  define _Py_tzname _tzname
+diff --git a/Modules/posixmodule.c b/Modules/posixmodule.c
+--- a/Modules/posixmodule.c
++++ b/Modules/posixmodule.c
+@@ -12420,7 +12420,7 @@
+ #endif /* HAVE_SYS_WAIT_H */
+ 
+ 
+-#if defined(HAVE_FSTATVFS) && defined(HAVE_SYS_STATVFS_H)
++#if (defined(HAVE_FSTATVFS) || defined(HAVE_STATVFS)) && defined(HAVE_SYS_STATVFS_H)
+ #ifdef _SCO_DS
+ /* SCO OpenServer 5.0 and later requires _SVID3 before it reveals the
+    needed definitions in sys/statvfs.h */
+@@ -12484,6 +12484,9 @@ _pystatvfs_fromstructstatvfs(PyObject *module, struct statvfs st) {
+ }
+ 
+ 
++#endif
++
++#if defined(HAVE_FSTATVFS) && defined(HAVE_SYS_STATVFS_H)
+ /*[clinic input]
+ os.fstatvfs
+     fd: int

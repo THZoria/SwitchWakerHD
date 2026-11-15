@@ -1,0 +1,18 @@
+diff --git a/llvm/lib/Support/Unix/Program.inc b/llvm/lib/Support/Unix/Program.inc
+--- a/llvm/lib/Support/Unix/Program.inc
++++ b/llvm/lib/Support/Unix/Program.inc
+@@ -582,5 +582,8 @@
+ bool llvm::sys::commandLineFitsWithinSystemLimits(StringRef Program,
+                                                   ArrayRef<StringRef> Args) {
++#if defined(__SWITCH2__)
++  return false; // No OS subprocess command line; integrated cc1 is unaffected.
++#else
+   static long ArgMax = sysconf(_SC_ARG_MAX);
+   // POSIX requires that _POSIX_ARG_MAX is 4096, which is the lowest possible
+   // value for ARG_MAX on a POSIX compliant system.
+@@ -618,4 +621,5 @@ bool llvm::sys::commandLineFitsWithinSystemLimits(StringRef Program,
+   }
+ 
+   return true;
++#endif
+ }

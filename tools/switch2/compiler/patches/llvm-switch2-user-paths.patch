@@ -1,0 +1,35 @@
+diff --git a/llvm/lib/Support/Unix/Path.inc b/llvm/lib/Support/Unix/Path.inc
+--- a/llvm/lib/Support/Unix/Path.inc
++++ b/llvm/lib/Support/Unix/Path.inc
+@@ -691,6 +691,7 @@ static void expandTildeExpr(SmallVectorImpl<char> &Path) {
+ 
+   // This is a string of the form ~username/, look up this user's entry in the
+   // password database.
++#if !defined(__SWITCH2__)
+   std::unique_ptr<char[]> Buf;
+   long BufSize = sysconf(_SC_GETPW_R_SIZE_MAX);
+   if (BufSize <= 0)
+@@ -710,6 +711,7 @@ static void expandTildeExpr(SmallVectorImpl<char> &Path) {
+   Path.clear();
+   Path.append(Entry->pw_dir, Entry->pw_dir + strlen(Entry->pw_dir));
+   llvm::sys::path::append(Path, Storage);
++#endif
+ }
+ 
+ void expand_tilde(const Twine &path, SmallVectorImpl<char> &dest) {
+@@ -1365,6 +1367,7 @@ bool home_directory(SmallVectorImpl<char> &result) {
+ bool home_directory(SmallVectorImpl<char> &result) {
+   std::unique_ptr<char[]> Buf;
+   char *RequestedDir = getenv("HOME");
++#if !defined(__SWITCH2__)
+   if (!RequestedDir) {
+     long BufSize = sysconf(_SC_GETPW_R_SIZE_MAX);
+     if (BufSize <= 0)
+@@ -1376,6 +1379,7 @@ bool home_directory(SmallVectorImpl<char> &result) {
+     if (pw && pw->pw_dir)
+       RequestedDir = pw->pw_dir;
+   }
++#endif
+   if (!RequestedDir)
+     return false;
+ 

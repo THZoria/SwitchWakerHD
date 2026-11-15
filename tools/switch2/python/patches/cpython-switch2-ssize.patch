@@ -1,0 +1,17 @@
+diff --git a/Include/pyport.h b/Include/pyport.h
+--- a/Include/pyport.h
++++ b/Include/pyport.h
+@@ -129,7 +129,13 @@
+ 
+ #elif HAVE_SSIZE_T
+ typedef ssize_t         Py_ssize_t;
++#if defined(__SWITCH2__) && !defined(SSIZE_MAX)
++/* newlib exposes ssize_t but not SSIZE_MAX on aarch64-none-elf. */
++#   define PY_SSIZE_T_MAX INTPTR_MAX
++typedef char _Py_switch2_ssize_width[(sizeof(ssize_t) == sizeof(intptr_t)) ? 1 : -1];
++#else
+ #   define PY_SSIZE_T_MAX SSIZE_MAX
++#endif
+ #elif SIZEOF_VOID_P == SIZEOF_SIZE_T
+ typedef Py_intptr_t     Py_ssize_t;
+ #   define PY_SSIZE_T_MAX INTPTR_MAX

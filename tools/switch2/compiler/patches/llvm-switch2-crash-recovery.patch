@@ -1,0 +1,17 @@
+diff --git a/llvm/lib/Support/CrashRecoveryContext.cpp b/llvm/lib/Support/CrashRecoveryContext.cpp
+--- a/llvm/lib/Support/CrashRecoveryContext.cpp
++++ b/llvm/lib/Support/CrashRecoveryContext.cpp
+@@ -329,6 +329,13 @@ static void uninstallExceptionOrSignalHandlers() {
+   }
+ }
+ 
++#elif defined(__SWITCH2__)
++// Horizon has no POSIX synchronous-signal recovery. Keep LLVM's explicit
++// HandleExit/setjmp path, but let actual faults terminate the homebrew rather
++// than installing fictitious signal handlers or marking failed output valid.
++static void installExceptionOrSignalHandlers() {}
++static void uninstallExceptionOrSignalHandlers() {}
++
+ #else // !_WIN32
+ 
+ // Generic POSIX implementation.
