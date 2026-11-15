@@ -21,6 +21,10 @@ repository; their instructions are in the upstream README, kept as
 [docs/upstream-README.md](docs/upstream-README.md). How the recompilation works:
 [docs/how-it-works.md](docs/how-it-works.md).
 
+[![Discord](https://img.shields.io/discord/454099185416011776?label=Join%20Discord&logo=discord&logoColor=white&style=for-the-badge)](https://discord.sighya.fr) <br>
+[![Latest release](https://img.shields.io/github/v/release/THZoria/SwitchWakerHD?label=Latest%20Release&color=05c09a&style=for-the-badge)](https://github.com/THZoria/SwitchWakerHD/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/THZoria/SwitchWakerHD/total?label=Downloads&color=blue&style=for-the-badge)](https://github.com/THZoria/SwitchWakerHD/releases)
+
 ## What you need
 
 - **Your own legally obtained copy of the game**: the USA version (title `00050000-10143500`) or the
