@@ -258,7 +258,9 @@ class Summaries:
             return None
         return self.li[name], self.md[name]
 
-    def solve(self):
+    def solve(self, progress_owner=None):
+        from recomp_progress import WorkProgress
+        progress = WorkProgress(progress_owner, "Propagation registres PowerPC")
         callers = {}
         for name, nodes in self.nodes.items():
             for nd in nodes:
@@ -268,6 +270,7 @@ class Summaries:
         work = list(self.nodes)
         queued = set(work)
         while work:
+            progress.begin(len(work))
             name = work.pop()
             queued.discard(name)
             self.rounds += 1
@@ -278,6 +281,7 @@ class Summaries:
                     if c not in queued:
                         queued.add(c)
                         work.append(c)
+            progress.advance(len(work))
         return self
 
 

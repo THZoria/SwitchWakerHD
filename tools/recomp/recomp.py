@@ -430,6 +430,8 @@ class Recompiler(fork_passes.ForkPasses):  # (this fork)
         self.fork_summaries()  # (this fork)
         files = self.fork_write_code(outdir, per_file)  # (this fork: hot layout, inline leaves)
         self.fork_stats()  # (this fork)
+        from recomp_progress import report
+        report(self, "Ecriture des tables et en-tetes", 0, 1)
         self.write_headers(outdir)
         if ppc2c.NAN_PROPAGATION:  # the helpers, next to funcs.h (the decomp's verify build has its own runtime)
             with _Output(os.path.join(outdir, "ppc_nan.h")) as f:
@@ -441,6 +443,7 @@ class Recompiler(fork_passes.ForkPasses):  # (this fork)
         else:
             Path(outdir, "randomizer.json").unlink(missing_ok=True)
         self.write_report(outdir, len(files))
+        report(self, "Ecriture des tables et en-tetes", 1, 1)
 
     def static_float_gqrs(self):
         """GQRs (bit n: GQRn) that no mtspr in the game's code writes. The runtime starts every

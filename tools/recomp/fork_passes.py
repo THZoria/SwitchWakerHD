@@ -10,6 +10,7 @@ the game's code (hot_functions.txt, addresses in the runtime's sources) hold can
 import os
 import re
 import sys
+from recomp_progress import tracked, report
 import time
 
 # a call that is not a tail call: a game function (direct or through the call-site cache), a runtime function, an import
@@ -228,7 +229,7 @@ class ForkPasses:
                                r"|psq_load\(c, (1[4-9]|2\d|3[01]),")
         tail = re.compile(r"MUSTTAIL return f_([0-9A-F]{8})\(c\)")
         frame, sets, nexts = {}, {}, {}
-        for start in self.sorted_entries:
+        for start in tracked(self, "Analyse sauvegardes PowerPC", self.sorted_entries):
             end = self.func_end(start)
             self.cur_start, self.cur_end = start, end
             self.labels = set()
@@ -477,11 +478,11 @@ class ForkPasses:
         abi = self.runtime_abi_hooks() & hooked
         self.callee_summ_build = calleeregs.Summaries(unknown=hooked - abi, abi_hooked=abi)
         self.summary_pass = True
-        for start in self.sorted_entries:
+        for start in tracked(self, "Analyse registres PowerPC", self.sorted_entries):
             self.emit_function(start)
         self.summary_pass = False
         self.cr_stats, self.helper_inlined, self.unhandled, self.used_imports = saved[0], saved[1], saved[2], saved[3]
-        summ = self.callee_summ_build.solve()
+        summ = self.callee_summ_build.solve(progress_owner=self)
         self.callee_summ = summ
         dump = os.environ.get("WWHD_RECOMP_DUMP_SUMMARIES")  # a diagnostic: name, LI, MD, why (hex masks), one line each
         if dump:
@@ -629,7 +630,7 @@ class ForkPasses:
 
         normal = []
         inline_src = {}
-        for start in self.sorted_entries:
+        for start in tracked(self, "Generation des fonctions C", self.sorted_entries):
             src, count = self.emit_function(start)
             if INLINE and self.inlinable and start in hot_rank:
                 inline_src[start] = src
@@ -667,6 +668,8 @@ class ForkPasses:
         for name in os.listdir(outdir):  # a smaller split must not leave old files behind
             if re.match(r"code_(hot_)?\d{3}\.c$", name):
                 os.remove(os.path.join(outdir, name))
+        written, count_files = 0, len(files) + len(hot_files)
+        report(self, "Ecriture des fichiers C", 0, count_files)
         for prefix, groups in (("code_%03d.c", files), ("code_hot_%03d.c", hot_files)):
             for i, funcs in enumerate(groups):
                 # "\n" on every host: the PGO check hashes these files (cmake/SwitchPgo.cmake), and Windows wrote CRLF (#118)
@@ -674,6 +677,8 @@ class ForkPasses:
                     f.write('#include "funcs.h"\n\n')
                     f.write("\n\n".join(funcs))
                     f.write("\n")
+                written += 1
+                report(self, "Ecriture des fichiers C", written, count_files)
         self.hot_count = len(hot_src)
         return files + hot_files
 

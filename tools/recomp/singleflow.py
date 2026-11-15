@@ -15,6 +15,7 @@ Both are solved together as a greatest fixpoint (must-analysis: start from "ever
 remove until stable). WWHD_RECOMP_SINGLE_IP=0 keeps the per-function analysis alone.
 """
 import os
+from recomp_progress import tracked, WorkProgress
 
 import ppc2c
 
@@ -140,7 +141,7 @@ class Solver:
         self.rc = rc
         self.funcs = {}
         starts = rc.sorted_entries
-        for k, s in enumerate(starts):
+        for k, s in enumerate(tracked(rc, "Analyse precision PowerPC", starts)):
             self.funcs[s] = Func(rc, s, rc.func_end(s))
         for s, f in self.funcs.items():
             for kind, t in list(f.calls.values()) + list(f.exits.values()):
@@ -241,10 +242,12 @@ class Solver:
         return state, sites, ret
 
     def solve(self):
+        progress = WorkProgress(self.rc, "Propagation precision PowerPC")
         work = list(self.funcs)
         queued = set(work)
         rounds = 0
         while work:
+            progress.begin(len(work))
             s = work.pop()
             queued.discard(s)
             rounds += 1
@@ -266,6 +269,7 @@ class Solver:
                     if t not in queued:
                         queued.add(t)
                         work.append(t)
+            progress.advance(len(work))
         self.rounds = rounds
         return self
 
