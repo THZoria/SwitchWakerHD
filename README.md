@@ -1,6 +1,7 @@
 # SwitchWakerHD
 
 **Switch 2 experimental port:** [port notes](docs/switch2-port.md).
+Runs on Switch 2 through **KaiHen**, using a compatible Homebrew Menu (hbmenu).
 The [standalone Windows PC builder](docs/switch2-pc-builder.md) builds a private
 `wwhd_switch2.nro` and external `romfs` folder from the owner's dump, without
 installing developer tools on the user's PC. The existing Switch 1 build is unchanged.
@@ -48,6 +49,9 @@ This fork adds a native Switch 2 target using libounce, OunceVK and SDL3, based 
 Switch 1 instructions below and desktop targets remain separate. The Switch 2
 homebrew credit is **SwitchWakerHD / Zoria**; this fork is maintained by **THZoria**.
 
+**Console requirements:** a Switch 2 running **KaiHen** with a compatible hbmenu.
+KaiHen is required to run the generated NRO on the console, not to use the PC builder.
+
 **Windows application:** extract the entire portable
 `WWHD-Switch2-PC-Builder-0.0.1-Windows-x64-EN.zip`, then run
 `WWHD-Switch2-Builder.exe` with its adjacent `assets` and `_internal` folders.
@@ -84,8 +88,8 @@ runtime. All generated game code, manifests and binaries stay private in `build/
 **Copy to microSD:** put `wwhd_switch2.nro` in `/switch/` and the **contents** of
 the application's `romfs` folder in `/switch/wwhd-switch2/game/`, yielding
 `game/code`, `game/content` and `game/meta`, not `game/romfs`. With the scripts,
-copy those three folders from your dump instead. Launch through a compatible
-Switch 2 hbmenu in full application mode, not album/applet mode.
+copy those three folders from your dump instead. With **KaiHen** running, launch
+through a compatible Switch 2 hbmenu in full application mode, not album/applet mode.
 
 Fresh settings use **30 FPS**, with interpolation and True 60 off, no startup
 setup menu and no clock changes. **L + R + Minus** opens/closes settings; existing
