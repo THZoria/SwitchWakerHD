@@ -12,7 +12,7 @@
 #if defined(__APPLE__) && !defined(WWHD_SDL_HOST)
 #include <AudioToolbox/AudioToolbox.h>
 #include <CoreAudio/CoreAudio.h>
-#elif defined(__SWITCH__)
+#elif defined(__SWITCH__) && !defined(__SWITCH2__)
 #include "platform/audio_out_switch.h"  // (this fork) audout
 #else
 #include <SDL3/SDL.h>
@@ -52,7 +52,7 @@ std::once_flag g_start;
 std::atomic<bool> g_flush{false}; // consumer skips everything queued
 #if defined(__APPLE__) && !defined(WWHD_SDL_HOST)
 AudioComponentInstance g_unit = nullptr;
-#elif defined(__SWITCH__)
+#elif defined(__SWITCH__) && !defined(__SWITCH2__)
 bool g_unit = false;
 #else
 SDL_AudioStream *g_unit = nullptr;
@@ -150,7 +150,7 @@ OSStatus render(void *, AudioUnitRenderActionFlags *, const AudioTimeStamp *, UI
         pull((int16_t *)io->mBuffers[0].mData, frames);
     return noErr;
 }
-#elif defined(__SWITCH__)
+#elif defined(__SWITCH__) && !defined(__SWITCH2__)
 // (this fork) audout's thread pulls: platform/audio_out_switch.cpp
 #else
 void SDLCALL render(void *, SDL_AudioStream *stream, int additional, int) {
@@ -353,7 +353,7 @@ void init() {
                                            kAudioObjectPropertyElementMain};
         AudioObjectAddPropertyListener(kAudioObjectSystemObject, &changed, output_changed, nullptr);
         LOG("[audio] CoreAudio output started (48 kHz, %d channels)", g_channels.load());
-#elif defined(__SWITCH__)
+#elif defined(__SWITCH__) && !defined(__SWITCH2__)
         open_dump();
         if (!(g_unit = audio_switch::start(pull))) return;  // (this fork) platform/audio_out_switch.cpp, stereo
 #else

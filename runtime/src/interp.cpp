@@ -1968,7 +1968,7 @@ extern "C" void hook_0203593C(Cpu* c) {
     ss::service(c);  // save states: exact values are back in guest memory, all other threads idle
     interp::NativeResumeBoundaryIssuer::after_service(c); // before any resumed native/game service
     mods::cheats_service();
-#ifdef __SWITCH__
+#if defined(__SWITCH__) && !defined(__SWITCH2__)
     prepare_graphics::frame(c);  // (this fork) Prepare graphics: its warps and Link's health
     audio_guard::frame();  // (this fork) the game's DSP-overload guard off (issue #13)
     bench::game_frame(c);        // (this fork) the performance test: the clock held, main-thread time (bench_switch.h)

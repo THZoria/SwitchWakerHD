@@ -172,8 +172,15 @@ void add_current_thread(const char* tag) {
     }
 }
 }  // namespace thread_sampler
-#elif !defined(__SWITCH__)  // (the Switch: thread_sampler_switch.cpp)
+#elif !defined(__SWITCH__) || defined(__SWITCH2__)  // Switch 1: thread_sampler_switch.cpp
 namespace thread_sampler {
 void add_current_thread(const char*) {}
+#ifdef __SWITCH2__
+void set_guest_stack(const uint32_t*) {}
+void start_flagged() {}
+void mark_frame(uint64_t, uint64_t, uint64_t) {}
+std::string start(double) { return "Thread sampling is unavailable on Switch 2"; }
+std::string status() { return "unavailable"; }
+#endif
 }  // namespace thread_sampler
 #endif

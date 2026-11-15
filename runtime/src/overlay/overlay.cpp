@@ -118,6 +118,9 @@ namespace gfxvk { bool buffer_cache_enabled(); unsigned submission_pool_slots();
 #include "../perf_metrics.h"
 #include "../build_info.h"
 #include "settings_shortcut.h"
+#ifdef __SWITCH2__
+#include "platform/switch2_profile.h"
+#endif
 #include "layer_escape.h"
 #include "toggle_guard.h"
 #include "open_reason.h"
@@ -2104,6 +2107,13 @@ void tab_shortcuts() {
             if (conflict) ImGui::PopStyleColor();
             for (int col = 0; col < 3; ++col) {
                 ImGui::TableNextColumn(); ImGui::PushID(col);
+#ifdef __SWITCH2__
+                if (col == 2 && a == kSettings) {
+                    ImGui::TextUnformatted("L + R + Minus");
+                    ImGui::PopID();
+                    continue;
+                }
+#endif
                 const auto& b = m.shortcuts[a];
                 std::string label = col < 2 ? shortcut_key_label(b.keys[col]) :
                     b.hold ? "Hold " + std::string(pad_short_label(b.hold)) + " + " + pad_short_label(b.button) :
@@ -3158,13 +3168,22 @@ void tab_about() {
              game_lang::name(U.language));
     }
     heading(menu_i18n::tr("About"));
+#ifdef __SWITCH2__
+    ImGui::Text("WWHD Switch 2 %s", build::version());
+    ImGui::TextUnformatted("SwitchWakerHD / Zoria");
+    ImGui::TextUnformatted("Based on github.com/centollOS/SwitchWakerHD and its contributors.");
+    note("Private build: game code recompiled from the owner's dump.");
+#endif
     ImGui::Text(menu_i18n::tr("The Legend of Zelda: The Wind Waker HD - native port (%s host, %s renderer)"), hostui::name(),
                 render::api_name(render::active()));
     if (*build::variant())  // the decomp build (docs/decomp-build.md)
         ImGui::Text(menu_i18n::tr("%s (%s), %s build: the game code runs from the decompiled source (experimental)"), build::version(),
                     build::commit(), build::variant());
     if (!ext::features().keyboard) {  // a controller only
-#ifdef __SWITCH__  // (this fork)
+#ifdef __SWITCH2__
+        note("Settings: L + R + Minus opens or closes the menu. Release all three before using it again. "
+             "B closes. L / R switch tabs. Menu inputs are not sent to the game.");
+#elif defined(__SWITCH__)  // (this fork)
         note("%s", menu_i18n::tr("Settings overlay: hold Minus for half a second (a short Minus goes to the game). B or Minus closes. "
              "L / R switch tabs. The game keeps running and sees no input while this menu is open."));
 #else
@@ -3532,6 +3551,9 @@ void poll_controller_shortcuts(const float* values) {
     const bool may_open = controller_may_open_settings(input::window_focused(), input::background_controllers());
     auto activate = [&](int a) {
         if (a == input_map::kSettings) {
+#ifdef __SWITCH2__
+            return;  // reserved platform chord; not a single Home/Select binding
+#endif
             const auto& b = m.shortcuts[a];
             if (!is_open() && !may_open) return;
             set_open(!is_open(), !b.hold && b.button == input_map::kPadHome ? OpenReason::Home : OpenReason::API);
@@ -3542,7 +3564,12 @@ void poll_controller_shortcuts(const float* values) {
     static SettingsShortcut shortcut;
     bool selectModifier = false;
     for (const auto& b : m.shortcuts) if (b.hold == input_map::kPadOptions && b.button) selectModifier = true;
-    const auto action = shortcut.poll(now_s(), !g_capturing_keys.load() && !selectModifier && pad[input_map::kPadOptions] > 0.5f,
+#ifdef __SWITCH2__
+    const bool selectSettings = false;  // Minus alone belongs to the game
+#else
+    const bool selectSettings = !g_capturing_keys.load() && !selectModifier && pad[input_map::kPadOptions] > 0.5f;
+#endif
+    const auto action = shortcut.poll(now_s(), selectSettings,
                                      false, is_open()); // Home is an ordinary, remappable Settings binding.
 
     if (action == SettingsShortcut::Close || (action == SettingsShortcut::Open && may_open))
@@ -3841,7 +3868,12 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
         if (open && !was_open) { U.gamepad_navigation.reset_trace(); wwhd_trace::emit("open frame=%d", U.init ? ImGui::GetFrameCount() : 0); }
         was_open = open;
     }
+#ifdef __SWITCH2__
+    switch2::profile::poll(open);
+    perf::set_demand(perf, (open && shown_builtin() == kGraphics) || switch2::profile::active());
+#else
     perf::set_demand(perf, open && shown_builtin() == kGraphics);
+#endif
     // Headless report QA uses the same formatter as the clipboard button; no clipboard mutation.
     // WWHD_TEST_PERF_REPORT=file (at WWHD_TEST_PERF_REPORT_AT presented frames, default 300), or
     // file@frames,file@frames,... for several reports in one run

@@ -4,7 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
-#if !defined(_WIN32)
+#if !defined(_WIN32) && !defined(__SWITCH__)
 #include <sys/resource.h>
 #endif
 
@@ -25,7 +25,7 @@ inline bool bytes(const Sample &sample, uint64_t &result) {
   return true;
 }
 inline bool query(Sample &result) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__SWITCH__)
   (void)result;
   return false;
 #else

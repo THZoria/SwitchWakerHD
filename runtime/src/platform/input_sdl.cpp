@@ -669,8 +669,10 @@ static void open_controller(SDL_JoystickID id){
    default:return 0;}};
   c.labels[0]=label(SDL_GAMEPAD_BUTTON_SOUTH);c.labels[1]=label(SDL_GAMEPAD_BUTTON_EAST);
   c.labels[2]=label(SDL_GAMEPAD_BUTTON_WEST);c.labels[3]=label(SDL_GAMEPAD_BUTTON_NORTH);
-  // a new controller (no bindings of its own, not declined) is offered the setup when it is first used
-  if(!who.is_virtual&&input_map::setup_offer_due(input_map::current(),who.guid,who.name,false))g_offer_pending.insert(id);
+   // a new controller (no bindings of its own, not declined) is offered the setup when it is first used
+#ifndef __SWITCH2__
+   if(!who.is_virtual&&input_map::setup_offer_due(input_map::current(),who.guid,who.name,false))g_offer_pending.insert(id);
+#endif
   LOG("[input] controller %s: guid %s%s",who.name.c_str(),guid,input_map::profile_index(input_map::current(),who.guid,who.name)>=0?", its own bindings":"");}
 }
 static void close_controller(SDL_JoystickID id){

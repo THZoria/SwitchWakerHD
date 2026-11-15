@@ -117,6 +117,10 @@ if(WIN32 AND CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
   endif()
 endif()
 
+if(WWHD_SWITCH2)
+  # C is compiled separately with Clang; GCC owns C++/TLS/newlib.
+  switch2_import_gamecode()
+else()
 add_library(gamecode STATIC ${GEN_SOURCES} ${GEN_DIR}/table.c ${GEN_DIR}/imports.c)
 target_include_directories(gamecode PUBLIC runtime/include ${GEN_DIR})
 # exact FP semantics: no contraction into FMA, no fast-math; PowerPC integer arithmetic wraps
@@ -124,8 +128,7 @@ target_compile_options(gamecode PRIVATE -O3 -ffp-contract=off -fno-strict-aliasi
 if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
   target_compile_options(gamecode PRIVATE -mcpu=apple-m1)
 endif()
-
-
+endif() # separate Switch 2 game-code archive
 # ---- vendored Cemu GPU pieces (MPL-2.0): address library + shader decompiler
 set(CEMU_DIR ${CMAKE_SOURCE_DIR}/runtime/third_party/cemu)
 file(GLOB_RECURSE CEMU_SOURCES CONFIGURE_DEPENDS ${CEMU_DIR}/*.cpp)
@@ -302,6 +305,10 @@ if(ANDROID)
   # Android: SDLActivity loads the game as libmain.so and calls its SDL_main (android/)
   add_library(wwhd SHARED ${RUNTIME_SOURCES} ${GX2_SOURCES} ${GFX_SOURCES} ${MOD_GFX_SOURCES} ${IMGUI_METAL})
   set_target_properties(wwhd PROPERTIES OUTPUT_NAME main)
+elseif(WWHD_SWITCH2 AND NOT WWHD_SWITCH2_BUILD_NRO)
+  # Compile-only milestone: no executable can be launched with an unfinished
+  # host/lifecycle layer. This target validates the real runtime and GX2 sources.
+  add_library(wwhd OBJECT ${RUNTIME_SOURCES} ${GX2_SOURCES} ${GFX_SOURCES} ${MOD_GFX_SOURCES})
 else()
   add_executable(wwhd ${RUNTIME_SOURCES} ${GX2_SOURCES} ${GFX_SOURCES} ${MOD_GFX_SOURCES} ${IMGUI_METAL})
 endif()

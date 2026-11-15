@@ -31,6 +31,9 @@
 #include <map>
 #include <mutex>
 #include <vector>
+#ifdef __SWITCH2__
+#include "platform/switch2_player_defaults.h"
+#endif
 
 
 namespace hostui {
@@ -290,6 +293,13 @@ void load_saved_options() {
     {
         std::lock_guard<std::mutex> lk(g_mu);
         load_locked();
+#ifdef __SWITCH2__
+        if (switch2::player::presentation_defaults(g_values,
+                env_set({"WWHD_INTERP", "WWHD_TRUE60", "WWHD_INTERP_FPS", "WWHD_INTERP_PACED"}))) {
+            save_locked();
+            LOG("[display sw2] defaults-v4: native 30 fps on fresh installs, interpolation off; saved player choices retained");
+        }
+#endif
         v = g_values;
     }
     auto saved = [&](const char* key, std::initializer_list<const char*> env) { return !env_set(env) && v.count(key); };
@@ -314,6 +324,11 @@ void load_saved_options() {
     if (saved("fps60", {"WWHD_INTERP", "WWHD_TRUE60", "WWHD_INTERP_FPS"})) interp::set_mode((int)num("fps60"));
     if (saved("fps60Paced", {"WWHD_INTERP_PACED"})) interp::load_paced_interpolation_at(60, num("fps60Paced") != 0);
     if (saved("fpsHighPaced", {"WWHD_INTERP_PACED"})) interp::load_paced_interpolation_at(120, num("fpsHighPaced") != 0);
+#ifdef __SWITCH2__
+    LOG("[display sw2] active mode=%s; target=%d fps; keep game speed=%s (target, not measured performance)",
+        interp::mode_name(), interp::mode() == 0 ? 30 : interp::output_fps(),
+        interp::paced_interpolation_at(60) ? "on" : "off");
+#endif
     if (saved("scaleFilter", {"WWHD_SCALE_FILTER"})) gfxvk::set_scale_filter((int)num("scaleFilter"));
     if (saved("vkPresentMode", {"WWHD_VK_PRESENT_MODE"})) gfxvk::set_present_mode((int)num("vkPresentMode"));
 #ifdef __ANDROID__

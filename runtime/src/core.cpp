@@ -7,7 +7,6 @@
 #endif
 #include "platform/host.h"
 #include "write_watch.h"
-#include <zlib.h>
 #ifdef __ANDROID__
 #include <android/log.h>
 #endif
@@ -202,60 +201,6 @@ void write_cstr(uint32_t ea, const std::string& s, uint32_t max) {
 }
 }  // namespace mem
 
-// ---------------------------------------------------------------- loader
-static uint32_t be32(const uint8_t* p) { return (uint32_t)p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3]; }
-static uint16_t be16(const uint8_t* p) { return (uint16_t)(p[0] << 8 | p[1]); }
-
-bool load_rpx(const std::string& path, LoadedModule& out) {
-    std::ifstream f(path, std::ios::binary);
-    if (!f) return false;
-    std::vector<uint8_t> d((std::istreambuf_iterator<char>(f)), {});
-    uint32_t shoff = be32(&d[0x20]);
-    uint16_t shentsize = be16(&d[0x2E]), shnum = be16(&d[0x30]);
-    out.entry = be32(&d[0x18]);
-    out.data_end = 0;
-    std::vector<crash_memory::Section> diagnostic_sections;
-    size_t diagnostic_bytes = 0;
-    for (int i = 0; i < shnum; i++) {
-        const uint8_t* sh = &d[shoff + i * shentsize];
-        uint32_t type = be32(sh + 4), flags = be32(sh + 8), addr = be32(sh + 12), off = be32(sh + 16), size = be32(sh + 20);
-        std::vector<uint8_t> data;
-        if (type != 8 && size) {
-            if (flags & 0x08000000) {
-                uLongf dlen = be32(&d[off]);
-                data.resize(dlen);
-                if (uncompress(data.data(), &dlen, &d[off + 4], size - 4) != Z_OK) fatal("zlib error in section %d", i);
-            } else {
-                data.assign(d.begin() + off, d.begin() + off + size);
-            }
-        }
-        if (type == 0x80000004 && data.size() >= 0x30) {  // RPL file info
-            out.sda_base = be32(&data[0x24]);
-            out.sda2_base = be32(&data[0x28]);
-            out.stack_size = be32(&data[0x2C]);
-        }
-        if (crash_memory::enabled() && (flags & 2)) {
-            crash_memory::Section section{addr, flags, {}, type == 8 ? uint64_t(size) : uint64_t(data.size())};
-            if ((flags & 7) == 6 && addr >= 0x02000000 && uint64_t(addr) + data.size() <= 0x10000000 && data.size() <= 16 * 1024 * 1024 - diagnostic_bytes) {
-                section.bytes = data; diagnostic_bytes += data.size();
-            }
-            diagnostic_sections.push_back(std::move(section));
-        }
-        // allocated sections in the text/data regions
-        if ((flags & 2) && addr >= 0x02000000 && addr < 0xC0000000) {
-            if (type == 8) {
-                memset(mem::ptr(addr), 0, size);
-                out.data_end = std::max(out.data_end, addr + size);
-            } else {
-                memcpy(mem::ptr(addr), data.data(), data.size());
-                if (addr >= mem::kMem2Start) out.data_end = std::max(out.data_end, addr + (uint32_t)data.size());
-            }
-        }
-    }
-    crash_memory::install(std::move(diagnostic_sections), PPC_MEM_BASE);
-    return true;
-}
-
 // ---------------------------------------------------------------- dispatch
 namespace dispatch {
 static detail::StartupSeal native_text_seal;
@@ -340,16 +285,30 @@ extern "C" void ppc_keep_failed(Cpu* c, int reg, uint32_t fn) {
     fatal("callee-saved %s%d changed across a call in %08X (lr=%08X)", reg < 32 ? "r" : "f", reg % 32, fn, c->lr);
 }
 
+#ifdef __SWITCH2__
+// GCC owns the C++/TLS/exception runtime. The Clang C entry point discards
+// its frame before entering guest code, including at -O0.
+extern "C" PpcFunc ppc_dispatch_resolve_switch2(Cpu* c) {
+#else
 extern "C" void ppc_dispatch(Cpu* c) {
+#endif
     if (mainprof::on(c)) mainprof::bump(mainprof::g_dispatches);
     PpcFunc f = dispatch::lookup(c->pc);
     if (!f) fatal("indirect branch to unknown address %08X (lr=%08X ctr=%08X)", c->pc, c->lr, c->ctr);
     if (c->pc - dispatch::kSlotBase < dispatch::kSlotSize ||
         c->pc - mem::kHleFuncBase < dispatch::kHostSize) {
         ppc_host_call(c, f);
+#ifdef __SWITCH2__
+        return nullptr;
+#else
         return;
+#endif
     }
+#ifdef __SWITCH2__
+    return f;
+#else
     MUSTTAIL return f(c);
+#endif
 }
 
 // (this fork) host targets (imports, HLE, native callbacks) go through ppc_host_call like ppc_dispatch's,

@@ -138,9 +138,17 @@ void ppc_preempt(Cpu* c);
  * small leaves (a tail call cannot be inlined: PPC_ENTER stays there) nor off the Switch (the desktop's
  * entry parking walks the host frames of a function that called ppc_preempt). */
 void ppc_preempt_again(Cpu* c, PpcFunc self);
+#if defined(__SWITCH2__) && defined(__clang__)
+/* Clang requires matching parameter counts for musttail. The GCC-only restart
+ * optimization above passes two parameters from a one-parameter game function.
+ * Keep the original call-and-resume scheduling check for this target, while
+ * retaining MUSTTAIL on actual guest dispatch/tail-call edges. */
+#define PPC_ENTER_FN(a, self) PPC_ENTER(a)
+#else
 #define PPC_ENTER_FN(a, self) do {                                            \
         if (__builtin_expect(c->preempt, 0)) MUSTTAIL return ppc_preempt_again(c, self); \
     } while (0)
+#endif
 #else
 #define PPC_ENTER(a) do {                                                     \
         if (__builtin_expect(g_ppc_trace, 0)) ppc_trace_enter(a);             \

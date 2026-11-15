@@ -8,6 +8,9 @@
 #include <thread>
 #include <vector>
 #include <cstdlib>
+#ifdef __SWITCH2__
+#include "switch2_paths.h"
+#endif
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -274,6 +277,8 @@ inline std::string config_dir() {
  const char* home=getenv("HOME");return std::string(home?home:".")+"/Library/Application Support/WWHD";
 #elif defined(_WIN32)
  const auto root=environment_utf8(L"APPDATA");return (root.empty()?std::string("."):root)+"/WWHD";
+#elif defined(__SWITCH2__)
+ return switch2::paths::root;
 #elif defined(__SWITCH__)
  return "sdmc:/switch/wwhd";
 #else

@@ -1,7 +1,10 @@
 # SwitchWakerHD (this fork): the Switch homebrew build (deko3d renderer, libnx host, devkitA64's GCC), kept
 # out of CMakeLists.txt. CMakeLists.txt includes this file near the top and calls the three macros below at
 # marked hooks. devkitPro's toolchain file (its own Switch.cmake) sets NX_ROOT.
-if(DEFINED NX_ROOT)
+if(NINTENDO_SWITCH2)
+  include("${CMAKE_CURRENT_LIST_DIR}/switch2/RuntimePort.cmake")
+  return()
+elseif(DEFINED NX_ROOT)
   set(WWHD_SWITCH ON)
 else()
   set(WWHD_SWITCH OFF)

@@ -11,7 +11,7 @@
 #include "../mods/guest_builtin.h"
 #include "imgui.h"
 
-#ifdef __SWITCH__
+#if defined(__SWITCH__) && !defined(__SWITCH2__)
 namespace overlay_switch { bool dev_options(); }  // "Show developer options" (platform/overlay_switch.cpp)
 #endif
 
@@ -79,7 +79,7 @@ bool developer_option(const Layout* l, const std::string& option) {
     return false;
 }
 bool show_developer_options() {
-#ifdef __SWITCH__
+#if defined(__SWITCH__) && !defined(__SWITCH2__)
     return overlay_switch::dev_options();
 #else
     return false;

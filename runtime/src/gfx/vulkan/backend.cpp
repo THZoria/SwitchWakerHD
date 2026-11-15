@@ -11,7 +11,10 @@
 #ifndef VK_ENABLE_BETA_EXTENSIONS
 #define VK_ENABLE_BETA_EXTENSIONS
 #endif
-#ifndef __ANDROID__
+#ifdef __SWITCH2__
+#include "platform/switch2_sdl_vulkan.h"
+#define WWHD_CREATE_WINDOW_SURFACE switch2::sdl_vulkan::create_surface
+#elif !defined(__ANDROID__)
 #define WWHD_CREATE_WINDOW_SURFACE SDL_Vulkan_CreateSurface
 #else
 #define WWHD_CREATE_WINDOW_SURFACE drivers::create_surface
@@ -2583,10 +2586,21 @@ static void begin_surface_retry(Screen& s, const char* op) {
   surfaceRetry[k].pending.store(true);
   hostui::post([k, old] {
     Screen& screen = k == 0 ? R.tv : R.drc;
-    if (old) SDL_Vulkan_DestroySurface(R.instance, old, nullptr);
+    if (old) {
+#ifdef __SWITCH2__
+      vkDestroySurfaceKHR(R.instance, old, nullptr);
+#else
+      SDL_Vulkan_DestroySurface(R.instance, old, nullptr);
+#endif
+    }
     VkSurfaceKHR fresh = VK_NULL_HANDLE;
     SDL_Window* window = screen.window.load();
-    if (!window || !SDL_Vulkan_CreateSurface(window, R.instance, nullptr, &fresh)) {
+#ifdef __SWITCH2__
+    const bool created = window && switch2::sdl_vulkan::create_surface(window, R.instance, nullptr, &fresh);
+#else
+    const bool created = window && SDL_Vulkan_CreateSurface(window, R.instance, nullptr, &fresh);
+#endif
+    if (!created) {
       LOG("[vulkan] new surface: %s", window ? SDL_GetError() : "no window");
       fresh = VK_NULL_HANDLE;
     }
@@ -3993,9 +4007,13 @@ void swap() {
     static gx2::ShaderKeyDirtyStats previousShaderDirty;
 #ifndef _WIN32
     auto threadCpuNs = []() -> uint64_t {
+#ifdef CLOCK_THREAD_CPUTIME_ID
       timespec time{};
       if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &time)) return 0;
       return uint64_t(time.tv_sec) * 1000000000ull + uint64_t(time.tv_nsec);
+#else
+      return 0;
+#endif
     };
     static uint64_t previousThreadCpu = threadCpuNs();
 #endif
@@ -5083,14 +5101,14 @@ static void set_window_icons() {
   SDL_DestroySurface(icon);
 }
 bool gamepad_window_available() {
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(__SWITCH2__)
   return false;
 #else
   return !getenv("WWHD_NO_GAMEPAD");
 #endif
 }
 SDL_Window* ensure_gamepad_window(bool create) {
-#if !defined(__ANDROID__)
+#if !defined(__ANDROID__) && !defined(__SWITCH2__)
   // Main thread creates the native window and surface; the render thread attaches Vulkan
   // resources at its next frame boundary. No second window exists until requested.
   static SDL_Window* requested = nullptr;
@@ -5151,6 +5169,9 @@ void init() {
   wayland_startup::configure();
   // the Vulkan loader (vulkan-1.dll, libvulkan.so.1), loaded here rather than imported (loader.h); the
   // windows below use the same one
+#ifdef __SWITCH2__
+  auto gipa = switch2::vulkan::entry_point();
+#else
   if (!SDL_Vulkan_LoadLibrary(nullptr))
     exception_report::raise(std::string("Vulkan is not installed on this computer: the Vulkan runtime "
 #ifdef _WIN32
@@ -5158,11 +5179,14 @@ void init() {
 #endif
                                          "could not be loaded (") + SDL_GetError() + ").\n\n" + kUpdateDriver);
   auto gipa = reinterpret_cast<PFN_vkGetInstanceProcAddr>(SDL_Vulkan_GetVkGetInstanceProcAddr());
+#endif
 #ifdef __ANDROID__
   if (auto custom = drivers::open_custom()) gipa = custom;
 #endif
   load_global_functions(gipa);
-#ifdef __ANDROID__
+#ifdef __SWITCH2__
+  R.tv.window = switch2::sdl_vulkan::create_window("Wind Waker HD - Vulkan", 1280, 720);
+#elif defined(__ANDROID__)
   SDL_AddEventWatch(lifecycle_watch, nullptr);
   const SDL_WindowFlags windowFlags = SDL_WINDOW_VULKAN | SDL_WINDOW_FULLSCREEN;
 #else
@@ -5177,7 +5201,9 @@ void init() {
 #endif
                                       (hidden_windows() ? SDL_WINDOW_HIDDEN : 0);
 #endif
+#ifndef __SWITCH2__
   R.tv.window = SDL_CreateWindow("Wind Waker HD — Vulkan", 1280, 720, windowFlags);
+#endif
   if (!R.tv.window)
     exception_report::raise(SDL_GetError());
 #ifdef WWHD_HDR_OUTPUT
@@ -5187,7 +5213,7 @@ void init() {
   quest_theater::initialize();
   // one surface: the GamePad picture is drawn into it (display_modes.h: picture-in-picture, GamePad
   // only), never a window of its own
-#else
+#elif !defined(__SWITCH2__)
   if (!getenv("WWHD_NO_GAMEPAD") && (!overlay::window_target::gamescope_session() ||
       ::hostui::startup_drc_mode() == gfx::kDrcWindow)) {
     // made hidden: the GamePad screen mode (load_saved_options below) shows it in window mode only;
@@ -5202,10 +5228,16 @@ void init() {
   if (!gfx::hidden::mode().presents())
     R.tv.visible = R.drc.visible = false;  // no drawables: pictures only reach frame / present dumps
   set_window_icons();
+#ifdef __SWITCH2__
+  const auto nativeExtensions = switch2::vulkan::instance_extensions();
+  const uint32_t n = static_cast<uint32_t>(nativeExtensions.size());
+  const char *const *se = nativeExtensions.data();
+#else
   uint32_t n;
   const char *const *se = SDL_Vulkan_GetInstanceExtensions(&n);
   if (!se)
     exception_report::raise(SDL_GetError());
+#endif
   for (Screen *s : {&R.tv, &R.drc})
     if (s->window) {
       int width = 0, height = 0;

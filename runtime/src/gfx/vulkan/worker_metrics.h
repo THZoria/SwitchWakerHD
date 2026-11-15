@@ -14,10 +14,12 @@ inline uint64_t thread_cpu_now() {
     return ((uint64_t(value.dwHighDateTime) << 32) | value.dwLowDateTime) * 100;
   };
   return ns(kernel) + ns(user);
-#else
+#elif defined(CLOCK_THREAD_CPUTIME_ID)
   timespec value{};
   if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &value)) return 0;
   return uint64_t(value.tv_sec) * 1000000000ull + uint64_t(value.tv_nsec);
+#else
+  return 0;  // unavailable (do not substitute wall time for CPU consumption)
 #endif
 }
 inline uint64_t cpu_elapsed(uint64_t start) {

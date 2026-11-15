@@ -1,0 +1,5 @@
+#pragma once
+// Private identity metadata derived from the user's checked dump. No game bytes.
+inline constexpr char kProbeRpxSha256[] = "@GAME_RPX_SHA256@";
+inline constexpr char kProbeBuild[] = "@GAME_BUILD@";
+inline constexpr uint32_t kProbeEntry = @GAME_ENTRY@u;
