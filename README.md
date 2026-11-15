@@ -1,5 +1,10 @@
 # SwitchWakerHD
 
+**Switch 2 experimental port:** [port notes](docs/switch2-port.md).
+The [standalone Windows PC builder](docs/switch2-pc-builder.md) builds a private
+`wwhd_switch2.nro` and external `romfs` folder from the owner's dump, without
+installing developer tools on the user's PC. The existing Switch 1 build is unchanged.
+
 ## What it is
 
 SwitchWakerHD is an unofficial native port of a 2013 Wii U adventure game (title ID
@@ -29,6 +34,62 @@ repository; their instructions are in the upstream README, kept as
   recompiled game.
 
 ## Build for the Switch
+
+### Switch 2 (experimental, version 0.0.1)
+
+This fork adds a native Switch 2 target using libounce, OunceVK and SDL3, based on
+[centollOS/SwitchWakerHD](https://github.com/centollOS/SwitchWakerHD). The existing
+Switch 1 instructions below and desktop targets remain separate. The Switch 2
+homebrew credit is **SwitchWakerHD / Zoria**; this fork is maintained by **THZoria**.
+
+**Windows application:** extract the entire portable
+`WWHD-Switch2-PC-Builder-0.0.1-Windows-x64-EN.zip`, then run
+`WWHD-Switch2-Builder.exe` with its adjacent `assets` and `_internal` folders.
+Choose your own unmodified USA/EUR version-0 Loadiine dump (containing
+`code/cking.rpx`, `content/` and `meta/meta.xml`), choose an output folder, then
+click **Build NRO and romfs folder**. Python, CMake, Visual Studio, MSYS and
+devkitPro are not required on the player's PC. The English interface shows
+stage percentages and a live activity log. Each build creates a separate private
+output directory without overwriting the dump or earlier results.
+[Application usage and developer packaging](docs/switch2-pc-builder.md).
+The portable package is built separately; it is not included in the source tree.
+
+**Python scripts without the application:** developers need Python 3.12+,
+devkitPro/devkitA64, CMake, Ninja and Clang with AArch64/musttail support.
+Set `DEVKITPRO` and prepare the pinned SDL/glslang sources as described in
+[the dependency instructions](docs/switch2-port.md#full-runtime-dependency-preparation-build-only-validation).
+On Windows the helpers use devkitPro's MSYS2 automatically. From the repository root:
+
+```sh
+python tools/switch2/build.py --fetch-sdk --rebuild-libounce
+python tools/switch2/prepare_game.py --game-dir "/path/to/your/extracted game"
+python tools/switch2/build.py --rebuild-libounce --game-manifest build/switch2/game-manifest.json --build-gamecode --clang "/path/to/clang" --jobs 2
+python tools/switch2/build_deps.py --jobs 2
+python tools/switch2/compile_runtime.py --nro --jobs 2
+```
+
+`prepare_game.py` validates the dump and generates private C sources and identity
+metadata. `build.py` prepares the SDK, rebuilds libounce for the installed C
+runtime and compiles the guest archive. `build_deps.py` installs dependencies
+locally under `build/`; `compile_runtime.py --nro` links and packages
+`build/switch2-game/wwhd_switch2.nro`. Without `--nro`, it only compiles the
+runtime. All generated game code, manifests and binaries stay private in `build/`.
+
+**Copy to microSD:** put `wwhd_switch2.nro` in `/switch/` and the **contents** of
+the application's `romfs` folder in `/switch/wwhd-switch2/game/`, yielding
+`game/code`, `game/content` and `game/meta`, not `game/romfs`. With the scripts,
+copy those three folders from your dump instead. Launch through a compatible
+Switch 2 hbmenu in full application mode, not album/applet mode.
+
+Fresh settings use **30 FPS**, with interpolation and True 60 off, no startup
+setup menu and no clock changes. **L + R + Minus** opens/closes settings; existing
+saved FPS choices are preserved. The earlier private port was played on hardware,
+but the NRO produced by the standalone PC builder still needs console validation.
+Never distribute your generated NRO or game resources. The old
+[console-installer experiment](docs/switch2-local-compilation.md) is separate
+from the supported PC workflow. [Port details and limitations](docs/switch2-port.md).
+
+### Switch 1
 
 **The short way** (step-by-step guide for players: [INSTALL.md](INSTALL.md)):
 `python3 tools/switch/make_sd.py --image game.wux` (or `--wua game.wua`, or `--game-dir <extracted game>`)
