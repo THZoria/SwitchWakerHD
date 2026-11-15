@@ -44,6 +44,12 @@
 #include "index_conversion.h"
 #include "vertex_history.h"
 #include "vertex_snapshot_history.h"
+#ifdef __SWITCH2__
+#include "platform/switch2_profile.h"
+#include "vertex_bind_batch.h"
+#include "validated_index_cache.h"
+#include "vertex_range_cache.h"
+#endif
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -61,6 +67,10 @@ extern "C" uint64_t g_shader_state_gen;
 using namespace Latte;
 namespace gfxvk {
 namespace {
+#ifdef __SWITCH2__
+ValidatedIndexCache<UploadSlice> validatedIndices;
+VertexRangeCache<UploadSlice, VkDevice> vertexRanges;
+#endif
 bool preparation_stats_enabled() {
   static const bool enabled=std::getenv("WWHD_VK_STATS")!=nullptr;
   return enabled;
@@ -258,8 +268,24 @@ UploadSlice vertex_snapshot(uint32_t binding, uint32_t address, uint32_t size,
       }
     }
   }
-  if (!enabled)
+  bool reuse = enabled;
+#ifdef __SWITCH2__
+  reuse = reuse || switch2::profile::reuse_vertices();
+#endif
+  if (!reuse)
     return snapshot(mem::ptr(address), size, 4);
+#ifdef __SWITCH2__
+  if (bounded && switch2::profile::reuse_vertices()) {
+    const auto before = vertexRanges.counters;
+    const auto slice = vertexRanges.get(R.device, R.submissionGeneration, address, size,
+        mem::ptr(address), R.uploadReadsDirect,
+        [](const void* bytes, size_t length) { return snapshot(bytes, length, 4); });
+    R.vertexReuseChecks += vertexRanges.counters.checks - before.checks;
+    R.vertexReuseHits += vertexRanges.counters.hits - before.hits;
+    R.vertexReuseBytes += vertexRanges.counters.reusedBytes - before.reusedBytes;
+    return slice;
+  }
+#endif
   static const bool historyEnabled = [] {
     const char* e = std::getenv("WWHD_VK_VERTEX_HISTORY_REUSE");
     return e && !std::strcmp(e, "1");
@@ -369,7 +395,11 @@ UploadSlice vertex_window_snapshot(uint32_t binding,uint32_t address,uint32_t re
   }
   static const bool reuse=[] {const char* e=std::getenv("WWHD_VK_REUSE_VERTEX_SNAPSHOTS");
     return e && !std::strcmp(e,"1");}();
-  Entry* entry=reuse && binding<entries.size()?&entries[binding]:nullptr;
+  bool reuseEnabled = reuse;
+#ifdef __SWITCH2__
+  reuseEnabled = reuseEnabled || switch2::profile::reuse_vertices();
+#endif
+  Entry* entry=reuseEnabled && binding<entries.size()?&entries[binding]:nullptr;
   const auto* fresh=static_cast<const uint8_t*>(source?source:mem::ptr(address))+begin;
   // compares the entry's CPU copy of the window, not the mapped slice, unless the entry was made with
   // direct reads (host-cached upload memory; vertex_snapshot_history.h)
@@ -2493,6 +2523,11 @@ StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
     }
     static const bool reuseUniforms = [] {
       const char* value = std::getenv("WWHD_VK_REUSE_UNIFORM_SNAPSHOTS");
+#ifdef __SWITCH2__
+      // Exact byte validation, not address-only reuse. Avoids upload allocation
+      // and descriptor churn for unchanged small uniform payloads.
+      if (!value) return true;
+#endif
       return value && std::strcmp(value, "1") == 0;
     }();
     // compares CPU copies of the slots' bytes, not mapped upload memory, unless the upload memory is
@@ -3013,7 +3048,13 @@ void reset_ao_private_cache() {
 void drain_pending_guest_pipelines() {
   for (auto& [key, value] : pipelines) resolve_pending_pipeline(value);
 }
-void reset_pipeline_lookup_cache() { lastPipelineLookup = {}; pipelineLookaside = {}; samplerMemo = {}; drawBatchState = {}; continuedEyes = {}; }
+void reset_pipeline_lookup_cache() {
+  lastPipelineLookup = {}; pipelineLookaside = {}; samplerMemo = {}; drawBatchState = {}; continuedEyes = {};
+#ifdef __SWITCH2__
+  validatedIndices.reset(); // also forget GPU handles across renderer/device recreation
+  vertexRanges.reset();
+#endif
+}
 uint64_t draw_batch_submissions() { return drawBatchSubmissions; }
 // WWHD_VK_TRACE_PASSES=1 (issue #144): log each new render pass shape once, just before the driver
 // sees it, so a crash inside vkCmdBeginRendering names the last pass in the crash report's log lines
@@ -3192,8 +3233,7 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
                        : !stripRestart || restartIndex == UINT32_MAX));
   // Draw uploads copy the converted bytes before the optional AO replay calls
   // draw again. Retain CPU capacity; queued GPU work owns separate arena slices.
-  static thread_local std::vector<uint32_t> indices;
-  indices.clear();
+  static thread_local std::vector<uint32_t> indexScratch;
   // Conversion emits a known number of indices. Allocate once rather than
   // repeatedly growing and copying the vector for every indexed draw.
   size_t convertedCount = indexAddr ? size_t(count) : 0;
@@ -3204,16 +3244,37 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
   case 0x12: convertedCount = size_t(count) + 1; break;
   default: break;
   }
-  static const bool specializeIndices = [] {
+  static const bool specializeIndicesEnv = [] {
     const char* e = std::getenv("WWHD_VK_SPECIALIZE_INDICES");
     return e && !std::strcmp(e, "1");
   }();
+  bool specializeIndices = specializeIndicesEnv;
+#ifdef __SWITCH2__
+  specializeIndices = specializeIndices || switch2::profile::specialize_indices();
+#endif
   // ld16/ld32 use uint32 guest-EA arithmetic. A wrapped BE range stays on
   // that original path instead of replacing it with linear host addressing.
   const uint64_t guestReads = prim == 0x12 ? std::max(count, 1u) : count;
   const uint64_t guestBytes = guestReads * (indexType == 4 ? 2 : 4);
   const bool guestWrap = indexAddr && (indexType == 4 || indexType == 9) &&
       uint64_t(indexAddr) + guestBytes > 0x100000000ull;
+#ifdef __SWITCH2__
+  ValidatedIndexCache<UploadSlice>::Entry* cpuIndexEntry = nullptr;
+  bool cpuIndexHit = false;
+  if (!replay && specializeIndices && indexAddr && !nativeIndices && !guestWrap &&
+      (indexType == 4 || indexType == 9) && !buffer_cache_enabled()) {
+    const ValidatedIndexCache<UploadSlice>::Key key{
+        indexAddr, count, prim, indexType, uint32_t(stripRestart), stripRestart ? restartIndex : 0};
+    cpuIndexEntry = validatedIndices.lookup(key, mem::ptr(indexAddr), size_t(guestBytes),
+        convertedCount ? convertedCount : count, cpuIndexHit);
+    R.cpuPreparation.indexConversionReuseHits += cpuIndexHit;
+  }
+  auto& indices = cpuIndexEntry ? cpuIndexEntry->indices : indexScratch;
+  if (!cpuIndexHit) indices.clear();
+#else
+  auto& indices = indexScratch;
+  indices.clear();
+#endif
   VkPrimitiveTopology topology;
   // Converted (big-endian, fan, quad, loop, other restart marker) index data from the buffer cache:
   // keyed by everything the conversion reads; a hit skips the conversion.
@@ -3237,6 +3298,10 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
   }
   if (convertedHit && !buffer_cache_verify()) {
     topology = primitive_topology(prim);
+#ifdef __SWITCH2__
+  } else if (cpuIndexHit) {
+    topology = primitive_topology(prim);
+#endif
   } else if (specializeIndices && !nativeIndices && !guestWrap) {
     switch (prim) {
     case 1: topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST; break;
@@ -3247,8 +3312,15 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
     case 6: topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP; break;
     default: exception_report::raise("unsupported Vulkan primitive");
     }
-    vk::convert_indices(indexAddr ? mem::ptr(indexAddr) : nullptr, prim, count,
+    const void* conversionSource = indexAddr ? mem::ptr(indexAddr) : nullptr;
+#ifdef __SWITCH2__
+    if (cpuIndexEntry) conversionSource = cpuIndexEntry->source.data();
+#endif
+    vk::convert_indices(conversionSource, prim, count,
                         indexType, stripRestart, restartIndex, indices);
+#ifdef __SWITCH2__
+    if (cpuIndexEntry) cpuIndexEntry->ready = true;
+#endif
   } else {
   if (!nativeIndices) indices.reserve(convertedCount);
   auto idx = [&](uint32_t i) {
@@ -3566,6 +3638,9 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
               dynamicOffsets.begin() + vres.dynamicOffsetCount);
   static const bool skipRedundantBinds = [] {
     const char* e=std::getenv("WWHD_VK_SKIP_REDUNDANT_BINDS");
+#ifdef __SWITCH2__
+    if (!e) return true;
+#endif
     return e && !std::strcmp(e,"1");
   }();
   DescriptorBindProbe::Matches matches;
@@ -3670,9 +3745,36 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
   state.stencilValid = true;
   rprof::mark(rprof::kRecord);
   rprof::UploadKind indexUploads(rprof::kUpIndex);
+#ifdef __SWITCH2__
+  VertexBindBatch<VkBuffer, VkDeviceSize> vertexBindings;
+  auto emitVertexBindings = [&](uint32_t first, uint32_t bindingCount,
+                                const VkBuffer* buffers, const VkDeviceSize* offsets) {
+    record::vkCmdBindVertexBuffers(cmd, first, bindingCount, buffers, offsets);
+    ++R.cpuPreparation.vertexBindingCommands;
+    if (preparationStats) ++R.vertexBindCalls;
+  };
+  auto bindVertex = [&](uint32_t binding, VkBuffer buffer, VkDeviceSize offset) {
+    ++R.cpuPreparation.vertexBindingInputs;
+    if (!vertexBindings.set(binding, buffer, offset)) {
+      // Future pipelines beyond our bounded scratch retain exact API behavior.
+      vertexBindings.flush(emitVertexBindings);
+      emitVertexBindings(binding, 1, &buffer, &offset);
+    }
+  };
+  auto flushVertexBindings = [&] { vertexBindings.flush(emitVertexBindings); };
+#else
+  auto bindVertex = [&](uint32_t binding, VkBuffer buffer, VkDeviceSize offset) {
+    record::vkCmdBindVertexBuffers(cmd, binding, 1, &buffer, &offset);
+    if (preparationStats) ++R.vertexBindCalls;
+  };
+  auto flushVertexBindings = [] {};
+#endif
   if (replay) {
     static const bool skipVertexBinds = [] {
       const char* e = std::getenv("WWHD_VK_SKIP_VERTEX_BINDS");
+#ifdef __SWITCH2__
+      if (!e) return true;
+#endif
       return e && !std::strcmp(e, "1");
     }();
     for (uint32_t i = 0; i < replay->vertexBindCount; ++i) {
@@ -3680,12 +3782,12 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
       const bool skip = skipVertexBinds && !R.vertexDiagnostics.noVertexReuse &&
           state.vertex_bind_matches(cmd, R.submissionGeneration,
           v.binding, v.buffer, v.offset);
-      if (!skip) record::vkCmdBindVertexBuffers(cmd, v.binding, 1, &v.buffer, &v.offset);
+      if (!skip) bindVertex(v.binding, v.buffer, v.offset);
       if (preparationStats) {
-        R.vertexBindCalls += !skip;
         R.vertexBindSkips += skip;
       }
     }
+    flushVertexBindings();
     rprof::mark(rprof::kVertex);
     if (replay->indexed) {
       bindIndex(replay->indexBuffer, replay->indexOffset, replay->indexType);
@@ -3742,8 +3844,25 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
     vertexExtent = cached_index_extent(*convertedEntry, nullptr, convertedEntry->outSize / 4, 4,
                                        hostRestart, int32_t(baseVertex));
   } else if (!indices.empty()) {
+#ifdef __SWITCH2__
+    if (cpuIndexEntry) {
+      if (!cpuIndexEntry->extentReady) {
+        const auto raw = index_extent_typed<uint32_t, true>(indices.data(), indices.size(), hostRestart, 0);
+        cpuIndexEntry->extentValid = raw.valid;
+        cpuIndexEntry->minimum = raw.minimum;
+        cpuIndexEntry->maximum = raw.maximum;
+        cpuIndexEntry->extentReady = true;
+      }
+      const int64_t minimum = int64_t(cpuIndexEntry->minimum) + int32_t(baseVertex);
+      const int64_t maximum = int64_t(cpuIndexEntry->maximum) + int32_t(baseVertex);
+      if (cpuIndexEntry->extentValid && minimum >= 0 && maximum <= UINT32_MAX)
+        vertexExtent = {true, uint32_t(maximum), vertex_copy_window_enabled() ? uint32_t(minimum) : 0};
+    } else
+#endif
+    {
     vertexExtent = indexed_vertex_extent(indices.data(), indices.size(), 4,
                                          hostRestart, int32_t(baseVertex));
+    }
   } else {
     const uint64_t maximum = uint64_t(baseVertex) + count - 1;
     vertexExtent = {maximum <= UINT32_MAX, uint32_t(maximum)};
@@ -3815,11 +3934,10 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
           R.properties.limits.maxVertexInputBindings);
       if (binding >= R.properties.limits.maxVertexInputBindings)
         exception_report::raise("CPU vertex classes exceed device vertex binding limit");
-      record::vkCmdBindVertexBuffers(cmd, binding, 1, &converted.buffer, &converted.offset);
+      bindVertex(binding, converted.buffer, converted.offset);
       if (shadersOut) shadersOut->add_vertex_bind(binding, converted.buffer, converted.offset);
       // The extra bind bypasses the normal bind cache.
       state.vertexBinds = {};
-      if (preparation_stats_enabled()) ++R.vertexBindCalls;
       if (cpuCount == uint32_t(g.attribCount)) continue;
     }
     if (R.vertexDiagnostics.noVertexReuse)
@@ -3833,6 +3951,9 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
     VkDeviceSize offset = b.offset;
     static const bool skipVertexBinds = [] {
       const char* e=std::getenv("WWHD_VK_SKIP_VERTEX_BINDS");
+#ifdef __SWITCH2__
+      if (!e) return true;
+#endif
       return e && !std::strcmp(e,"1");
     }();
     // Snapshot preparation above stays fresh even when its immutable slice is
@@ -3840,13 +3961,13 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
     const bool skip=skipVertexBinds && !R.vertexDiagnostics.noVertexReuse && state.vertex_bind_matches(cmd,
         R.submissionGeneration,g.attributeBufferIndex,b.buffer,offset);
     if(preparation_stats_enabled()) {
-      R.vertexBindCalls+=!skip;
       R.vertexBindSkips+=skip;
     }
     if (shadersOut) shadersOut->add_vertex_bind(g.attributeBufferIndex, b.buffer, offset);
     if(!skip)
-      record::vkCmdBindVertexBuffers(cmd,g.attributeBufferIndex,1,&b.buffer,&offset);
+      bindVertex(g.attributeBufferIndex, b.buffer, offset);
   }
+  flushVertexBindings();
 #ifdef __ANDROID__
   static std::set<std::tuple<uint32_t, uint32_t, bool, bool, bool, bool>> seenIndexPaths;
   const auto indexDiagnostic = std::make_tuple(prim, indexType, nativeIndices, bool(indexAddr), baseVertex != 0, stripRestart);
@@ -3878,7 +3999,18 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
     if(deferredPipelineDraw) { auto* pipeline=&p; record::emit_owned([=] { if(pipeline->pipeline) gfxvk::vkCmdDraw(cmd, count, instances, baseVertex, 0); }); }
     else record::vkCmdDraw(cmd, count, instances, baseVertex, 0);
   } else {
-    auto b = snapshot(indices.data(), indices.size() * 4, 4);
+    UploadSlice b;
+#ifdef __SWITCH2__
+    if (cpuIndexEntry) {
+      const auto device = reinterpret_cast<uintptr_t>(R.device);
+      if (cpuIndexEntry->slice.buffer && cpuIndexEntry->device == device &&
+          cpuIndexEntry->generation == R.submissionGeneration)
+        R.cpuPreparation.indexUploadBytesSaved += indices.size() * 4;
+      b = cpuIndexEntry->upload(device, R.submissionGeneration,
+          [](const void* bytes, size_t size) { return snapshot(bytes, size, 4); });
+    } else
+#endif
+      b = snapshot(indices.data(), indices.size() * 4, 4);
     if (indexAddr) rprof::guest_read(rprof::kUpIndex, indexAddr, guestBytes);
     bindIndex(b.buffer, b.offset, VK_INDEX_TYPE_UINT32);
     recordDraw(true, b.buffer, b.offset, VK_INDEX_TYPE_UINT32, indices.size());

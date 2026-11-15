@@ -6,6 +6,9 @@
 #include <memory>
 #include "../shader_identity.h"
 #include "shader_source.h"
+#ifdef __SWITCH2__
+#include "uniform_copy_plan.h"
+#endif
 #include "Cafe/HW/Latte/LegacyShaderDecompiler/LatteDecompiler.h"
 namespace stereo { struct EyeRows; }
 
@@ -38,6 +41,16 @@ struct Shader {
     LatteDecompilerShaderResourceMapping mapping;
     DescriptorRankPlan descriptorRanks;
     LatteDecompilerOutputUniformOffsets uniforms;
+#ifdef __SWITCH2__
+    // Initialized on first render-thread pack; immutable shader metadata only.
+    struct UniformPlan {
+        bool ready = false;
+        UniformCopyPlan registers;
+        struct Group { uint32_t bank; UniformCopyPlan copies; };
+        std::vector<Group> groups;
+    };
+    mutable UniformPlan uniformPlan;
+#endif
     SpirvWords spirvWords; // shared with the SPIR-V disk cache entry
     std::shared_ptr<ShaderBinary> binary; // CPU result; immutable metadata is already published
     std::string glsl; // Mutable translation scratch, released once the compile is requested.
@@ -94,6 +107,7 @@ struct ShaderStats {
     // differently), and pre-narrowing keys that the narrow key splits.
     uint64_t programs = 0, shaders = 0, variantKeys = 0, variantAliases = 0, moduleAliases = 0;
     uint64_t verifyChecks = 0, verifyViolations = 0, verifySplitKeys = 0, verifyNs = 0;
+    uint64_t uniformPlanPacks = 0, uniformPlanCopies = 0, uniformPlanChecks = 0, uniformPlanMismatches = 0;
 };
 ShaderStats shader_stats();
 // Render-thread-only diagnostic payload/capacity counters, not total allocator heap.

@@ -1,4 +1,7 @@
 #include "vertex_cpu_policy.h"
+#ifdef __SWITCH2__
+#include "platform/switch2_profile.h"
+#endif
 #include "../stereo_projection.h"
 #include "../stereo.h"
 #include "atomic_temporary.h"
@@ -1331,9 +1334,10 @@ ShaderMemoryStats shader_memory_stats() {
     return result;
 }
 
-void pack_uniforms_into(const uint32_t* regs, const Shader& shader,
+static void pack_uniforms_impl(const uint32_t* regs, const Shader& shader,
                         std::vector<uint8_t>& data, float scaleX, float scaleY,
-                        float eyeOffset, float convergence, stereo::EyeRows* eyeRows) {
+                        float eyeOffset, float convergence, stereo::EyeRows* eyeRows,
+                        [[maybe_unused]] bool usePlan) {
     if (stereo::layoutDrawDepth) eyeOffset = 0;
     const auto& offsets = shader.uniforms;
     data.resize((std::max(offsets.offset_endOfBlock, 16) + 15) & ~15);
@@ -1358,26 +1362,60 @@ void pack_uniforms_into(const uint32_t* regs, const Shader& shader,
         }
     };
     if (offsets.offset_remapped >= 0) {
-        for (const auto& entry : shader.dec->list_remappedUniformEntries_register) {
-            copy(offsets.offset_remapped + entry.mappedIndexOffset, regs + aluBase + entry.indexOffset / 4, 16);
-            if (entry.indexOffset <= 4096-64)
-                projectionRow(offsets.offset_remapped+entry.mappedIndexOffset,
-                    regs+aluBase+entry.indexOffset/4,4096-entry.indexOffset);
-        }
-        for (const auto& group : shader.dec->list_remappedUniformEntries_bufferGroups) {
-            uint32_t address = regs[blockBase + group.kcacheBankIdOffset / 4];
-            if (!address) continue;
-            const size_t blockSize = std::min<uint32_t>(regs[blockBase+group.kcacheBankIdOffset/4+1]+1,0x10000);
-            // a block of a display list: its bytes as submitted (gx2/submitted_uniforms.h); entries
-            // past the block's end still read guest memory, as before
-            const uint8_t* submitted = gx2::submitted_uniform_block(address, uint32_t(blockSize));
-            for (const auto& entry : group.entries) {
-                const void* src = submitted && entry.indexOffset + 16 <= blockSize
-                    ? static_cast<const void*>(submitted + entry.indexOffset) : ppc_ptr(address + entry.indexOffset);
-                copy(offsets.offset_remapped + entry.mappedIndexOffset, src, 16);
-                if (entry.indexOffset < blockSize)
+#ifdef __SWITCH2__
+        // Stereo row rewriting retains the reference path. In normal mono
+        // rendering, interpret immutable copy metadata once, not per draw.
+        if (usePlan && (!shader.vertex || eyeOffset == 0)) {
+            auto& plan = shader.uniformPlan;
+            if (!plan.ready) {
+                for (const auto& entry : shader.dec->list_remappedUniformEntries_register)
+                    plan.registers.append(entry.indexOffset / 4 * 4,
+                        int64_t(offsets.offset_remapped) + entry.mappedIndexOffset, data.size());
+                for (const auto& group : shader.dec->list_remappedUniformEntries_bufferGroups) {
+                    Shader::UniformPlan::Group compiled{uint32_t(group.kcacheBankIdOffset / 4), {}};
+                    for (const auto& entry : group.entries)
+                        compiled.copies.append(entry.indexOffset,
+                            int64_t(offsets.offset_remapped) + entry.mappedIndexOffset, data.size());
+                    plan.groups.push_back(std::move(compiled));
+                }
+                plan.ready = true;
+            }
+            ++stats.uniformPlanPacks;
+            stats.uniformPlanCopies += plan.registers.spans.size();
+            plan.registers.registers(data.data(), regs + aluBase);
+            for (const auto& group : plan.groups) {
+                const uint32_t address = regs[blockBase + group.bank];
+                if (!address) continue;
+                const size_t blockSize = std::min<uint32_t>(regs[blockBase + group.bank + 1] + 1, 0x10000);
+                const auto* submitted = gx2::submitted_uniform_block(address, uint32_t(blockSize));
+                group.copies.guest(data.data(), address, blockSize, submitted,
+                    [](uint32_t ea) { return ppc_ptr(ea); });
+                stats.uniformPlanCopies += group.copies.spans.size();
+            }
+        } else
+#endif
+        {
+            for (const auto& entry : shader.dec->list_remappedUniformEntries_register) {
+                copy(offsets.offset_remapped + entry.mappedIndexOffset, regs + aluBase + entry.indexOffset / 4, 16);
+                if (entry.indexOffset <= 4096-64)
                     projectionRow(offsets.offset_remapped+entry.mappedIndexOffset,
-                        src,blockSize-entry.indexOffset);
+                        regs+aluBase+entry.indexOffset/4,4096-entry.indexOffset);
+            }
+            for (const auto& group : shader.dec->list_remappedUniformEntries_bufferGroups) {
+                uint32_t address = regs[blockBase + group.kcacheBankIdOffset / 4];
+                if (!address) continue;
+                const size_t blockSize = std::min<uint32_t>(regs[blockBase+group.kcacheBankIdOffset/4+1]+1,0x10000);
+                // a block of a display list: its bytes as submitted (gx2/submitted_uniforms.h); entries
+                // past the block's end still read guest memory, as before
+                const uint8_t* submitted = gx2::submitted_uniform_block(address, uint32_t(blockSize));
+                for (const auto& entry : group.entries) {
+                    const void* src = submitted && entry.indexOffset + 16 <= blockSize
+                        ? static_cast<const void*>(submitted + entry.indexOffset) : ppc_ptr(address + entry.indexOffset);
+                    copy(offsets.offset_remapped + entry.mappedIndexOffset, src, 16);
+                    if (entry.indexOffset < blockSize)
+                        projectionRow(offsets.offset_remapped+entry.mappedIndexOffset,
+                            src,blockSize-entry.indexOffset);
+                }
             }
         }
     }
@@ -1416,6 +1454,29 @@ void pack_uniforms_into(const uint32_t* regs, const Shader& shader,
             add ? ::gfx::sampler_lod_bias::host(regs[Latte::REGADDR::SQ_TEX_SAMPLER_WORD0_0 + ((shader.vertex ? 18 : 0) + samplerId) * 3 + 1])
                 : 0.0f);
     }
+}
+
+void pack_uniforms_into(const uint32_t* regs, const Shader& shader,
+                       std::vector<uint8_t>& data, float scaleX, float scaleY,
+                       float eyeOffset, float convergence, stereo::EyeRows* eyeRows) {
+    bool usePlan = false;
+#ifdef __SWITCH2__
+    usePlan = switch2::profile::uniform_copy_plan();
+#endif
+    pack_uniforms_impl(regs, shader, data, scaleX, scaleY, eyeOffset, convergence, eyeRows, usePlan);
+#ifdef __SWITCH2__
+    if (usePlan && switch2::profile::verify_uniform_copy_plan()) {
+        static thread_local std::vector<uint8_t> reference;
+        pack_uniforms_impl(regs, shader, reference, scaleX, scaleY, eyeOffset, convergence, nullptr, false);
+        ++stats.uniformPlanChecks;
+        if (data != reference) {
+            if (++stats.uniformPlanMismatches <= 16)
+                fprintf(stderr, "[vulkan CPU uniforms] MISMATCH shader=%016llx stage=%s; using reference bytes\n",
+                    (unsigned long long)shader.key, shader.vertex ? "vertex" : "pixel");
+            data = reference;
+        }
+    }
+#endif
 }
 
 std::vector<uint8_t> pack_uniforms(const uint32_t* regs, const Shader& shader,

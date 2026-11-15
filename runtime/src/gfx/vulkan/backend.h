@@ -174,6 +174,8 @@ struct Renderer {
  uint64_t descriptorLookups=0,descriptorCacheHits=0,descriptorAllocations=0,descriptorFastHits=0;
  struct CpuPreparationStats {
   uint64_t packCalls=0,packBytes=0,packCapacityGrowths=0,packCapacityGrowthBytes=0;
+  uint64_t vertexBindingInputs=0,vertexBindingCommands=0;
+  uint64_t indexConversionReuseHits=0,indexUploadBytesSaved=0;
   uint64_t uniformSnapshotCalls=0,uniformSnapshotBytes=0;
   uint64_t samplerRequests=0,samplerMemoHits=0,samplerMapLookups=0;
   uint64_t uniformReuseChecks=0,uniformReuseComparisons=0,uniformReuseHits=0,uniformReuseBytes=0;
